@@ -97,15 +97,36 @@ class SIBANKTestBase(unittest.TestCase):
         time.sleep(2)
 
     def logout(self):
-        """Helper: logout dari aplikasi."""
+        """Helper: logout dari aplikasi via POST form."""
         try:
-            logout_btn = self.driver.find_element(By.CSS_SELECTOR, ".btn-logout")
-            logout_btn.click()
+            # Logout menggunakan form POST, bukan GET link
+            # Submit form yang berisi tombol .btn-logout
+            self.driver.execute_script(
+                "document.querySelector('.btn-logout').closest('form').submit();"
+            )
             time.sleep(2)
         except Exception:
-            # Fallback: navigate ke logout form
-            self.driver.get(f"{BASE_URL}/logout")
-            time.sleep(1)
+            # Fallback: submit POST via JavaScript
+            try:
+                self.driver.execute_script(
+                    "var f = document.createElement('form');"
+                    "f.method = 'POST';"
+                    "f.action = arguments[0] + '/logout';"
+                    "var csrf = document.querySelector('meta[name=csrf-token]');"
+                    "if(csrf) {"
+                    "  var i = document.createElement('input');"
+                    "  i.type = 'hidden'; i.name = '_token'; i.value = csrf.content;"
+                    "  f.appendChild(i);"
+                    "}"
+                    "document.body.appendChild(f); f.submit();",
+                    BASE_URL
+                )
+                time.sleep(2)
+            except Exception:
+                # Last resort: hapus cookies untuk paksa logout
+                self.driver.delete_all_cookies()
+                self.driver.get(f"{BASE_URL}/login")
+                time.sleep(1)
 
     def assert_url_contains(self, expected_path):
         """Assert bahwa URL saat ini mengandung path tertentu."""
@@ -514,7 +535,8 @@ class TestJenisSampah(SIBANKTestBase):
         self.driver.get(f"{BASE_URL}/admin/jenis-sampah")
         time.sleep(1)
 
-        self.assert_text_present("Jenis & Harga Sampah")
+        # Gunakan "Harga Sampah" karena "&" di HTML di-encode jadi "&amp;"
+        self.assert_text_present("Harga Sampah")
         self.assert_text_present("Botol Plastik")
         self.assert_text_present("Rp")
 
@@ -640,16 +662,23 @@ class TestTransaksiSetor(SIBANKTestBase):
         berat_input = self.driver.find_element(By.CSS_SELECTOR, ".berat-input")
         berat_input.clear()
         berat_input.send_keys("5")
-        time.sleep(0.5)
+        time.sleep(1)  # Beri waktu lebih untuk JS kalkulasi
 
         # Assert subtotal terhitung (JavaScript)
         subtotal = self.driver.find_element(By.CSS_SELECTOR, ".subtotal-display")
-        subtotal_value = subtotal.get_attribute("value")
-        self.assertNotEqual(subtotal_value, "Rp 0", "Subtotal harus terhitung otomatis")
+        subtotal_value = subtotal.get_attribute("value") or ""
+        # Value awal input kosong (""), setelah JS jalan jadi "Rp X.XXX"
+        self.assertTrue(
+            subtotal_value != "" and subtotal_value != "Rp 0",
+            f"Subtotal harus terhitung otomatis, tapi got: '{subtotal_value}'"
+        )
 
         # Assert grand total terhitung
         grand_total = self.driver.find_element(By.ID, "grand-total").text
-        self.assertNotEqual(grand_total, "Rp 0", "Grand total harus terhitung")
+        self.assertTrue(
+            grand_total != "Rp 0" and "Rp" in grand_total,
+            f"Grand total harus terhitung, tapi got: '{grand_total}'"
+        )
 
         self.screenshot("setor_filled")
 

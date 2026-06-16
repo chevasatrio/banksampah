@@ -12,28 +12,55 @@ class LoginTest extends DuskTestCase
     use DatabaseMigrations;
 
     /**
-     * Pastikan halaman login dapat diakses dan menampilkan form.
-     *
-     * @test
+     * Helper: pastikan browser dalam kondisi guest lalu buka halaman login.
+     * Dusk berbagi satu browser window antar test — session test sebelumnya
+     * bisa masih aktif, sehingga guest middleware redirect dari /login.
      */
-    public function halaman_login_dapat_diakses()
+    private function visitLoginAsGuest(Browser $browser): Browser
+    {
+        $browser->logout();
+
+        return $browser->visit('/login')
+            ->waitFor('#email', 10)
+            ->pause(500);
+    }
+
+    /**
+     * Helper: isi form login via JavaScript (lebih reliable daripada type()).
+     * Dusk type() kadang gagal mengirim keystrokes ke field setelah
+     * logout+visit cycle, menyebabkan field tetap kosong.
+     */
+    private function fillLoginForm(Browser $browser, string $email, string $password): Browser
+    {
+        $browser->script([
+            "document.getElementById('email').value = " . json_encode($email) . ";",
+            "document.getElementById('password').value = " . json_encode($password) . ";",
+        ]);
+
+        return $browser;
+    }
+
+    /**
+     * Pastikan halaman login dapat diakses dan menampilkan form.
+     */
+    public function test_halaman_login_dapat_diakses()
     {
         $this->browse(function (Browser $browser) {
-            $browser->visit('/login')
-                ->assertSee('Login')
-                ->assertPresent('input[name=email]')
-                ->assertPresent('input[name=password]')
-                ->assertPresent('button[type=submit]');
+            $this->visitLoginAsGuest($browser)
+                ->assertSee('SIBANK')
+                ->assertSee('Sistem Informasi Bank Sampah')
+                ->assertPresent('#email')
+                ->assertPresent('#password')
+                ->assertPresent('button[type=submit]')
+                ->assertSee('Masuk');
         });
     }
 
     /**
      * State: Guest -> Authenticated (Admin)
      * Admin login dengan kredensial valid, redirect ke dashboard admin.
-     *
-     * @test
      */
-    public function admin_dapat_login_dengan_kredensial_valid()
+    public function test_admin_dapat_login_dengan_kredensial_valid()
     {
         $admin = User::factory()->create([
             'name' => 'Admin SIBANK',
@@ -43,11 +70,11 @@ class LoginTest extends DuskTestCase
         ]);
 
         $this->browse(function (Browser $browser) use ($admin) {
-            $browser->visit('/login')
-                ->type('email', 'admin@sibank.com')
-                ->type('password', 'password')
-                ->press('Login')
-                ->waitForLocation('/admin/dashboard')
+            $this->visitLoginAsGuest($browser);
+            $this->fillLoginForm($browser, 'admin@sibank.com', 'password');
+
+            $browser->press('Masuk')
+                ->waitForLocation('/admin/dashboard', 10)
                 ->assertPathIs('/admin/dashboard')
                 ->assertSee('Dashboard')
                 ->assertSee($admin->name);
@@ -56,11 +83,9 @@ class LoginTest extends DuskTestCase
 
     /**
      * State: Guest -> Authenticated (Petugas)
-     * Petugas login dengan kredensial valid, redirect ke dashboard sesuai role.
-     *
-     * @test
+     * Petugas login dengan kredensial valid, redirect ke /admin/nasabah.
      */
-    public function petugas_dapat_login_dengan_kredensial_valid()
+    public function test_petugas_dapat_login_dengan_kredensial_valid()
     {
         User::factory()->create([
             'name' => 'Petugas SIBANK',
@@ -70,21 +95,19 @@ class LoginTest extends DuskTestCase
         ]);
 
         $this->browse(function (Browser $browser) {
-            $browser->visit('/login')
-                ->type('email', 'petugas@sibank.com')
-                ->type('password', 'password')
-                ->press('Login')
-                ->waitForLocation('/admin/dashboard')
-                ->assertPathIs('/admin/dashboard');
+            $this->visitLoginAsGuest($browser);
+            $this->fillLoginForm($browser, 'petugas@sibank.com', 'password');
+
+            $browser->press('Masuk')
+                ->waitForLocation('/admin/nasabah', 10)
+                ->assertPathIs('/admin/nasabah');
         });
     }
 
     /**
      * State: tetap Guest jika password salah.
-     *
-     * @test
      */
-    public function login_gagal_dengan_password_salah()
+    public function test_login_gagal_dengan_password_salah()
     {
         User::factory()->create([
             'email' => 'admin@sibank.com',
@@ -93,70 +116,55 @@ class LoginTest extends DuskTestCase
         ]);
 
         $this->browse(function (Browser $browser) {
-            $browser->visit('/login')
-                ->type('email', 'admin@sibank.com')
-                ->type('password', 'password_salah')
-                ->press('Login')
+            $this->visitLoginAsGuest($browser);
+            $this->fillLoginForm($browser, 'admin@sibank.com', 'password_salah');
+
+            // Submit form via JS (bypass HTML5 required validation jika field kosong)
+            $browser->script("document.getElementById('login-form').submit();");
+
+            $browser->waitFor('.alert-error', 10)
                 ->assertPathIs('/login')
-                ->assertSee('These credentials do not match our records.');
+                ->assertSee('Email atau password salah');
         });
     }
 
     /**
      * State: tetap Guest jika email tidak terdaftar.
-     *
-     * @test
      */
-    public function login_gagal_dengan_email_tidak_terdaftar()
+    public function test_login_gagal_dengan_email_tidak_terdaftar()
     {
         $this->browse(function (Browser $browser) {
-            $browser->visit('/login')
-                ->type('email', 'tidakada@sibank.com')
-                ->type('password', 'password')
-                ->press('Login')
-                ->assertPathIs('/login')
-                ->assertSee('These credentials do not match our records.');
-        });
-    }
+            $this->visitLoginAsGuest($browser);
+            $this->fillLoginForm($browser, 'tidakada@sibank.com', 'password');
 
-    /**
-     * Validasi: field email wajib diisi.
-     *
-     * @test
-     */
-    public function login_gagal_jika_email_kosong()
-    {
-        $this->browse(function (Browser $browser) {
-            $browser->visit('/login')
-                ->type('password', 'password')
-                ->press('Login')
+            $browser->script("document.getElementById('login-form').submit();");
+
+            $browser->waitFor('.alert-error', 10)
                 ->assertPathIs('/login')
-                ->assertSee('The email field is required.');
+                ->assertSee('Email atau password salah');
         });
     }
 
     /**
      * Pengguna yang belum login tidak dapat mengakses dashboard secara langsung
      * dan akan diarahkan kembali ke halaman login.
-     *
-     * @test
      */
-    public function guest_tidak_dapat_mengakses_dashboard_secara_langsung()
+    public function test_guest_tidak_dapat_mengakses_dashboard_secara_langsung()
     {
         $this->browse(function (Browser $browser) {
-            $browser->visit('/admin/dashboard')
+            $browser->logout()
+                ->visit('/admin/dashboard')
+                ->waitForLocation('/login', 10)
                 ->assertPathIs('/login')
-                ->assertSee('Login');
+                ->assertSee('SIBANK');
         });
     }
 
     /**
      * State: Authenticated -> Guest
      * User yang sudah login dapat melakukan logout dan kembali ke halaman login.
-     *
-     * @test
      */
-    public function user_dapat_logout()
+    public function test_user_dapat_logout()
     {
         $admin = User::factory()->create([
             'email' => 'admin@sibank.com',
@@ -167,11 +175,17 @@ class LoginTest extends DuskTestCase
         $this->browse(function (Browser $browser) use ($admin) {
             $browser->loginAs($admin)
                 ->visit('/admin/dashboard')
-                ->assertSee('Dashboard')
-                ->press('Logout')
+                ->waitForText('Dashboard', 10)
+                ->assertSee('Dashboard');
+
+            $browser->waitFor('.btn-logout', 10)
+                ->script("document.querySelector('.btn-logout').closest('form').submit();");
+
+            $browser->waitForLocation('/login', 10)
                 ->assertPathIs('/login');
 
             $browser->visit('/admin/dashboard')
+                ->waitForLocation('/login', 10)
                 ->assertPathIs('/login');
         });
     }

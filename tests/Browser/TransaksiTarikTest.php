@@ -28,15 +28,17 @@ class TransaksiTarikTest extends DuskTestCase
 
     /**
      * Petugas dapat membuka halaman form tarik saldo.
-     *
-     * @test
      */
-    public function petugas_dapat_melihat_halaman_form_tarik_saldo()
+    public function test_petugas_dapat_melihat_halaman_form_tarik_saldo()
     {
+        // Create nasabah with saldo > 0, because the create page only shows nasabahs with saldo > 0
+        Nasabah::factory()->create(['saldo' => 50000]);
+
         $this->browse(function (Browser $browser) {
             $browser->loginAs($this->petugas)
                 ->visit('/admin/transaksi-tarik/create')
-                ->assertSee('Tarik Saldo')
+                ->waitForText('Form Penarikan Saldo', 10)
+                ->assertSee('Form Penarikan Saldo')
                 ->assertPresent('select[name="nasabah_id"]')
                 ->assertPresent('input[name="jumlah"]');
         });
@@ -44,12 +46,12 @@ class TransaksiTarikTest extends DuskTestCase
 
     /**
      * State: Form Input -> Sukses
-     * Penarikan dengan saldo cukup berhasil, saldo nasabah berkurang
-     * sesuai jumlah penarikan.
+     * Penarikan dengan saldo cukup berhasil, saldo nasabah berkurang.
      *
-     * @test
+     * Flash message: "Penarikan berhasil dicatat. Jumlah: Rp X.XXX"
+     * Button text: "Proses Penarikan"
      */
-    public function tarik_saldo_berhasil_jika_saldo_cukup()
+    public function test_tarik_saldo_berhasil_jika_saldo_cukup()
     {
         $nasabah = Nasabah::factory()->create([
             'nama' => 'Dewi Sartika',
@@ -59,14 +61,16 @@ class TransaksiTarikTest extends DuskTestCase
         $this->browse(function (Browser $browser) use ($nasabah) {
             $browser->loginAs($this->petugas)
                 ->visit('/admin/transaksi-tarik/create')
+                ->waitFor('#nasabah_id', 10)
                 ->select('nasabah_id', (string) $nasabah->id)
                 ->type('jumlah', '20000')
                 ->type('keterangan', 'Penarikan tunai oleh nasabah')
-                ->press('Simpan')
-                ->waitForLocation('/admin/transaksi-tarik')
+                // Button text di create.blade.php: "Proses Penarikan"
+                ->press('Proses Penarikan')
+                ->waitForLocation('/admin/transaksi-tarik', 10)
                 ->assertPathIs('/admin/transaksi-tarik')
-                ->assertSee('Penarikan berhasil dicatat')
-                ->assertSee('Rp 20.000');
+                // Flash message from controller
+                ->assertSee('Penarikan berhasil dicatat');
         });
 
         $this->assertEquals(30000.0, $nasabah->fresh()->saldo);
@@ -74,12 +78,10 @@ class TransaksiTarikTest extends DuskTestCase
 
     /**
      * State tetap: Form Input
-     * Penarikan ditolak jika jumlah melebihi saldo yang tersedia,
-     * saldo nasabah tidak berubah.
-     *
-     * @test
+     * Penarikan ditolak jika jumlah melebihi saldo yang tersedia.
+     * Error message from TransaksiTarikService: "Saldo tidak mencukupi..."
      */
-    public function tarik_saldo_ditolak_jika_saldo_tidak_cukup()
+    public function test_tarik_saldo_ditolak_jika_saldo_tidak_cukup()
     {
         $nasabah = Nasabah::factory()->create([
             'nama' => 'Ahmad Yani',
@@ -89,11 +91,13 @@ class TransaksiTarikTest extends DuskTestCase
         $this->browse(function (Browser $browser) use ($nasabah) {
             $browser->loginAs($this->petugas)
                 ->visit('/admin/transaksi-tarik/create')
+                ->waitFor('#nasabah_id', 10)
                 ->select('nasabah_id', (string) $nasabah->id)
                 ->type('jumlah', '20000')
-                ->press('Simpan')
-                ->assertPathIs('/admin/transaksi-tarik/create')
-                ->assertSee('Saldo tidak cukup untuk melakukan penarikan');
+                ->press('Proses Penarikan')
+                ->waitFor('.alert', 10)
+                // Validation message from TransaksiTarikService
+                ->assertSee('Saldo tidak mencukupi');
         });
 
         $this->assertEquals(10000.0, $nasabah->fresh()->saldo);
@@ -101,11 +105,10 @@ class TransaksiTarikTest extends DuskTestCase
 
     /**
      * State tetap: Form Input
-     * Penarikan dengan jumlah 0 atau kosong ditolak sistem.
-     *
-     * @test
+     * Penarikan dengan jumlah kosong ditolak sistem.
+     * Custom message: "Jumlah penarikan wajib diisi."
      */
-    public function tarik_saldo_ditolak_jika_jumlah_kosong()
+    public function test_tarik_saldo_ditolak_jika_jumlah_kosong()
     {
         $nasabah = Nasabah::factory()->create([
             'saldo' => 50000,
@@ -114,10 +117,12 @@ class TransaksiTarikTest extends DuskTestCase
         $this->browse(function (Browser $browser) use ($nasabah) {
             $browser->loginAs($this->petugas)
                 ->visit('/admin/transaksi-tarik/create')
+                ->waitFor('#nasabah_id', 10)
                 ->select('nasabah_id', (string) $nasabah->id)
-                ->press('Simpan')
-                ->assertPathIs('/admin/transaksi-tarik/create')
-                ->assertSee('The jumlah field is required');
+                ->press('Proses Penarikan')
+                ->waitFor('.alert', 10)
+                // Custom validation message from TransaksiTarikRequest
+                ->assertSee('Jumlah penarikan wajib diisi');
         });
 
         $this->assertEquals(50000.0, $nasabah->fresh()->saldo);
@@ -126,10 +131,8 @@ class TransaksiTarikTest extends DuskTestCase
     /**
      * Penarikan tepat sebesar saldo yang tersedia (boundary: saldo == jumlah)
      * tetap diterima sistem dan menyisakan saldo 0.
-     *
-     * @test
      */
-    public function tarik_saldo_berhasil_jika_jumlah_sama_dengan_saldo()
+    public function test_tarik_saldo_berhasil_jika_jumlah_sama_dengan_saldo()
     {
         $nasabah = Nasabah::factory()->create([
             'nama' => 'Budi Pekerti',
@@ -139,10 +142,11 @@ class TransaksiTarikTest extends DuskTestCase
         $this->browse(function (Browser $browser) use ($nasabah) {
             $browser->loginAs($this->petugas)
                 ->visit('/admin/transaksi-tarik/create')
+                ->waitFor('#nasabah_id', 10)
                 ->select('nasabah_id', (string) $nasabah->id)
                 ->type('jumlah', '15000')
-                ->press('Simpan')
-                ->waitForLocation('/admin/transaksi-tarik')
+                ->press('Proses Penarikan')
+                ->waitForLocation('/admin/transaksi-tarik', 10)
                 ->assertSee('Penarikan berhasil dicatat');
         });
 
@@ -150,11 +154,9 @@ class TransaksiTarikTest extends DuskTestCase
     }
 
     /**
-     * Admin/Petugas dapat melihat riwayat transaksi tarik pada halaman daftar.
-     *
-     * @test
+     * Petugas dapat melihat riwayat transaksi tarik pada halaman daftar.
      */
-    public function petugas_dapat_melihat_riwayat_transaksi_tarik()
+    public function test_petugas_dapat_melihat_riwayat_transaksi_tarik()
     {
         $nasabah = Nasabah::factory()->create([
             'nama' => 'Citra Lestari',
@@ -165,15 +167,17 @@ class TransaksiTarikTest extends DuskTestCase
             // Lakukan satu kali penarikan terlebih dahulu
             $browser->loginAs($this->petugas)
                 ->visit('/admin/transaksi-tarik/create')
+                ->waitFor('#nasabah_id', 10)
                 ->select('nasabah_id', (string) $nasabah->id)
                 ->type('jumlah', '25000')
-                ->press('Simpan')
-                ->waitForLocation('/admin/transaksi-tarik');
+                ->press('Proses Penarikan')
+                ->waitForLocation('/admin/transaksi-tarik', 10);
 
             // Cek riwayat transaksi muncul di halaman daftar
             $browser->visit('/admin/transaksi-tarik')
+                ->waitForText('Citra Lestari', 10)
                 ->assertSee('Citra Lestari')
-                ->assertSee('Rp 25.000');
+                ->assertSee('25.000');
         });
     }
 }

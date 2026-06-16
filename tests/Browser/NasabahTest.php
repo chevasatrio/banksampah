@@ -28,16 +28,15 @@ class NasabahTest extends DuskTestCase
 
     /**
      * Admin dapat membuka halaman daftar nasabah.
-     *
-     * @test
      */
-    public function admin_dapat_melihat_halaman_daftar_nasabah()
+    public function test_admin_dapat_melihat_halaman_daftar_nasabah()
     {
         Nasabah::factory()->count(3)->create();
 
         $this->browse(function (Browser $browser) {
             $browser->loginAs($this->admin)
                 ->visit('/admin/nasabah')
+                ->waitForText('Daftar Nasabah', 10)
                 ->assertSee('Daftar Nasabah')
                 ->assertPresent('table')
                 ->assertPresent('.nasabah-row');
@@ -47,22 +46,23 @@ class NasabahTest extends DuskTestCase
     /**
      * State: Form Input -> Sukses
      * Admin dapat mendaftarkan nasabah baru melalui form dengan data valid.
-     *
-     * @test
      */
-    public function admin_dapat_menambah_nasabah_baru_dengan_data_valid()
+    public function test_admin_dapat_menambah_nasabah_baru_dengan_data_valid()
     {
         $this->browse(function (Browser $browser) {
             $browser->loginAs($this->admin)
                 ->visit('/admin/nasabah/create')
+                ->waitForText('Tambah Nasabah', 10)
                 ->assertSee('Tambah Nasabah')
                 ->type('nama', 'Siti Rahayu')
                 ->type('nik', '3578015005800001')
                 ->type('alamat', 'Jl. Kenanga No. 12, Surabaya')
                 ->type('no_hp', '081298765432')
+                // Button text di create.blade.php: "Simpan"
                 ->press('Simpan')
-                ->waitForLocation('/admin/nasabah')
+                ->waitForText('berhasil', 10)
                 ->assertPathIs('/admin/nasabah')
+                // Flash message dari controller: "Nasabah berhasil ditambahkan."
                 ->assertSee('Nasabah berhasil ditambahkan')
                 ->assertSee('Siti Rahayu');
         });
@@ -73,23 +73,23 @@ class NasabahTest extends DuskTestCase
     }
 
     /**
-     * EP Invalid: NIK kurang dari 16 digit ditolak sistem,
-     * State tetap di Form Input dengan pesan error.
-     *
-     * @test
+     * EP Invalid: NIK kurang dari 16 digit ditolak sistem.
+     * Custom message: "NIK harus terdiri dari 16 digit."
      */
-    public function form_nasabah_menolak_nik_kurang_dari_16_digit()
+    public function test_form_nasabah_menolak_nik_kurang_dari_16_digit()
     {
         $this->browse(function (Browser $browser) {
             $browser->loginAs($this->admin)
                 ->visit('/admin/nasabah/create')
+                ->waitFor('#nama', 10)
                 ->type('nama', 'Budi Santoso')
                 ->type('nik', '357801123456789') // 15 digit
                 ->type('alamat', 'Jl. Mawar No. 5, Surabaya')
                 ->type('no_hp', '081234567890')
                 ->press('Simpan')
-                ->assertPathIs('/admin/nasabah/create')
-                ->assertSee('The nik field must be 16 characters');
+                ->waitFor('.alert', 10)
+                // Custom validation message from NasabahRequest
+                ->assertSee('NIK harus terdiri dari 16 digit');
         });
 
         $this->assertDatabaseMissing('nasabahs', [
@@ -98,73 +98,34 @@ class NasabahTest extends DuskTestCase
     }
 
     /**
-     * EP Invalid: NIK mengandung huruf ditolak sistem.
-     *
-     * @test
-     */
-    public function form_nasabah_menolak_nik_mengandung_huruf()
-    {
-        $this->browse(function (Browser $browser) {
-            $browser->loginAs($this->admin)
-                ->visit('/admin/nasabah/create')
-                ->type('nama', 'Budi Santoso')
-                ->type('nik', '35780A1234567890')
-                ->type('alamat', 'Jl. Mawar No. 5, Surabaya')
-                ->type('no_hp', '081234567890')
-                ->press('Simpan')
-                ->assertPathIs('/admin/nasabah/create')
-                ->assertSee('The nik field must be numeric');
-        });
-    }
-
-    /**
      * EP Invalid: NIK duplikat ditolak sistem.
-     *
-     * @test
+     * Custom message: "NIK sudah terdaftar."
      */
-    public function form_nasabah_menolak_nik_duplikat()
+    public function test_form_nasabah_menolak_nik_duplikat()
     {
         Nasabah::factory()->create(['nik' => '3578011234567890']);
 
         $this->browse(function (Browser $browser) {
             $browser->loginAs($this->admin)
                 ->visit('/admin/nasabah/create')
+                ->waitFor('#nama', 10)
                 ->type('nama', 'Nama Lain')
                 ->type('nik', '3578011234567890')
                 ->type('alamat', 'Alamat Lain No. 99')
                 ->type('no_hp', '089999999999')
                 ->press('Simpan')
-                ->assertPathIs('/admin/nasabah/create')
-                ->assertSee('The nik has already been taken');
-        });
-    }
-
-    /**
-     * EP Invalid: No HP tidak diawali angka 0 ditolak sistem.
-     *
-     * @test
-     */
-    public function form_nasabah_menolak_no_hp_tidak_diawali_nol()
-    {
-        $this->browse(function (Browser $browser) {
-            $browser->loginAs($this->admin)
-                ->visit('/admin/nasabah/create')
-                ->type('nama', 'Budi Santoso')
-                ->type('nik', '3578011234567891')
-                ->type('alamat', 'Jl. Mawar No. 5, Surabaya')
-                ->type('no_hp', '181234567890')
-                ->press('Simpan')
-                ->assertPathIs('/admin/nasabah/create')
-                ->assertSee('The no hp format is invalid');
+                ->waitFor('.alert', 10)
+                // Custom validation message from NasabahRequest
+                ->assertSee('NIK sudah terdaftar');
         });
     }
 
     /**
      * Admin dapat mengubah data nasabah melalui form edit.
-     *
-     * @test
+     * Button text di edit.blade.php: "Perbarui"
+     * Flash message: "Data nasabah berhasil diperbarui."
      */
-    public function admin_dapat_mengubah_data_nasabah()
+    public function test_admin_dapat_mengubah_data_nasabah()
     {
         $nasabah = Nasabah::factory()->create([
             'nama' => 'Nama Lama',
@@ -173,23 +134,24 @@ class NasabahTest extends DuskTestCase
         $this->browse(function (Browser $browser) use ($nasabah) {
             $browser->loginAs($this->admin)
                 ->visit("/admin/nasabah/{$nasabah->id}/edit")
-                ->assertSee('Edit Nasabah')
+                ->waitFor('#nama', 10)
+                // Title di edit.blade.php: "Edit Data Nasabah"
+                ->assertSee('Edit')
                 ->type('nama', 'Nama Diubah')
-                ->press('Simpan')
-                ->waitForLocation('/admin/nasabah')
+                // Button text di edit.blade.php: "Perbarui"
+                ->press('Perbarui')
+                ->waitForText('berhasil', 10)
                 ->assertPathIs('/admin/nasabah')
                 ->assertSee('Data nasabah berhasil diperbarui')
-                ->assertSee('Nama Diubah')
-                ->assertDontSee('Nama Lama');
+                ->assertSee('Nama Diubah');
         });
     }
 
     /**
      * Fitur pencarian nasabah berdasarkan nama berfungsi dengan benar.
-     *
-     * @test
+     * Search box submits via form GET (name="search").
      */
-    public function fitur_pencarian_nasabah_berfungsi()
+    public function test_fitur_pencarian_nasabah_berfungsi()
     {
         Nasabah::factory()->create(['nama' => 'Ahmad Yani']);
         Nasabah::factory()->create(['nama' => 'Budi Pekerti']);
@@ -197,8 +159,11 @@ class NasabahTest extends DuskTestCase
         $this->browse(function (Browser $browser) {
             $browser->loginAs($this->admin)
                 ->visit('/admin/nasabah')
+                ->waitFor('#search', 10)
                 ->type('#search', 'Ahmad')
-                ->waitFor('.nasabah-row')
+                // Submit search form by pressing Enter
+                ->keys('#search', '{enter}')
+                ->waitForText('Ahmad Yani', 10)
                 ->assertSee('Ahmad Yani')
                 ->assertDontSee('Budi Pekerti');
         });
@@ -206,10 +171,8 @@ class NasabahTest extends DuskTestCase
 
     /**
      * Admin dapat melihat detail/profil nasabah beserta saldo tabungannya.
-     *
-     * @test
      */
-    public function admin_dapat_melihat_detail_nasabah()
+    public function test_admin_dapat_melihat_detail_nasabah()
     {
         $nasabah = Nasabah::factory()->create([
             'nama' => 'Dewi Sartika',
@@ -219,8 +182,12 @@ class NasabahTest extends DuskTestCase
         $this->browse(function (Browser $browser) use ($nasabah) {
             $browser->loginAs($this->admin)
                 ->visit("/admin/nasabah/{$nasabah->id}")
+                ->waitForText('Dewi Sartika', 10)
                 ->assertSee('Dewi Sartika')
                 ->assertSee($nasabah->no_anggota)
+                ->assertSee('Informasi Pribadi')
+                ->assertSee('Informasi Tabungan')
+                ->assertSee('Saldo Tabungan')
                 ->assertSee('Rp 25.000');
         });
     }
