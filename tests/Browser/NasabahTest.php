@@ -31,7 +31,11 @@ class NasabahTest extends DuskTestCase
      */
     public function test_admin_dapat_melihat_halaman_daftar_nasabah()
     {
-        Nasabah::factory()->count(3)->create();
+        Nasabah::factory()->count(3)->sequence(
+            ['no_hp' => '081200000001'],
+            ['no_hp' => '081200000002'],
+            ['no_hp' => '081200000003']
+        )->create();
 
         $this->browse(function (Browser $browser) {
             $browser->loginAs($this->admin)
@@ -103,7 +107,7 @@ class NasabahTest extends DuskTestCase
      */
     public function test_form_nasabah_menolak_nik_duplikat()
     {
-        Nasabah::factory()->create(['nik' => '3578011234567890']);
+        Nasabah::factory()->create(['nik' => '3578011234567890', 'no_hp' => '081200000010']);
 
         $this->browse(function (Browser $browser) {
             $browser->loginAs($this->admin)
@@ -129,6 +133,7 @@ class NasabahTest extends DuskTestCase
     {
         $nasabah = Nasabah::factory()->create([
             'nama' => 'Nama Lama',
+            'no_hp' => '081200000020',
         ]);
 
         $this->browse(function (Browser $browser) use ($nasabah) {
@@ -153,8 +158,8 @@ class NasabahTest extends DuskTestCase
      */
     public function test_fitur_pencarian_nasabah_berfungsi()
     {
-        Nasabah::factory()->create(['nama' => 'Ahmad Yani']);
-        Nasabah::factory()->create(['nama' => 'Budi Pekerti']);
+        Nasabah::factory()->create(['nama' => 'Ahmad Yani', 'no_hp' => '081200000030']);
+        Nasabah::factory()->create(['nama' => 'Budi Pekerti', 'no_hp' => '081200000031']);
 
         $this->browse(function (Browser $browser) {
             $browser->loginAs($this->admin)
@@ -176,6 +181,7 @@ class NasabahTest extends DuskTestCase
     {
         $nasabah = Nasabah::factory()->create([
             'nama' => 'Dewi Sartika',
+            'no_hp' => '081200000040',
             'saldo' => 25000,
         ]);
 

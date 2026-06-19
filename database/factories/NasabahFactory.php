@@ -23,7 +23,7 @@ class NasabahFactory extends Factory
             'nama' => fake('id_ID')->name(),
             'nik' => fake()->unique()->numerify('################'),
             'alamat' => fake('id_ID')->address(),
-            'no_hp' => fake('id_ID')->phoneNumber(),
+            'no_hp' => fake()->numerify('08##########'),
             'saldo' => 0,
             'is_active' => true,
             'user_id' => null,

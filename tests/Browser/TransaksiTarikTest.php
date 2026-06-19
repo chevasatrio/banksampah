@@ -31,8 +31,10 @@ class TransaksiTarikTest extends DuskTestCase
      */
     public function test_petugas_dapat_melihat_halaman_form_tarik_saldo()
     {
-        // Create nasabah with saldo > 0, because the create page only shows nasabahs with saldo > 0
-        Nasabah::factory()->create(['saldo' => 50000]);
+        Nasabah::factory()->create([
+            'no_hp' => '081234567890',
+            'saldo' => 50000,
+        ]);
 
         $this->browse(function (Browser $browser) {
             $browser->loginAs($this->petugas)
@@ -55,6 +57,7 @@ class TransaksiTarikTest extends DuskTestCase
     {
         $nasabah = Nasabah::factory()->create([
             'nama' => 'Dewi Sartika',
+            'no_hp' => '081234567890',
             'saldo' => 50000,
         ]);
 
@@ -65,11 +68,9 @@ class TransaksiTarikTest extends DuskTestCase
                 ->select('nasabah_id', (string) $nasabah->id)
                 ->type('jumlah', '20000')
                 ->type('keterangan', 'Penarikan tunai oleh nasabah')
-                // Button text di create.blade.php: "Proses Penarikan"
                 ->press('Proses Penarikan')
                 ->waitForLocation('/admin/transaksi-tarik', 10)
                 ->assertPathIs('/admin/transaksi-tarik')
-                // Flash message from controller
                 ->assertSee('Penarikan berhasil dicatat');
         });
 
@@ -80,11 +81,16 @@ class TransaksiTarikTest extends DuskTestCase
      * State tetap: Form Input
      * Penarikan ditolak jika jumlah melebihi saldo yang tersedia.
      * Error message from TransaksiTarikService: "Saldo tidak mencukupi..."
+     *
+     * NOTE: Client-side JS pada form ini men-disable tombol submit ketika
+     * jumlah > saldo. Harus bypass via JS submit agar server-side validation
+     * bisa diuji.
      */
     public function test_tarik_saldo_ditolak_jika_saldo_tidak_cukup()
     {
         $nasabah = Nasabah::factory()->create([
             'nama' => 'Ahmad Yani',
+            'no_hp' => '081234567891',
             'saldo' => 10000,
         ]);
 
@@ -93,10 +99,18 @@ class TransaksiTarikTest extends DuskTestCase
                 ->visit('/admin/transaksi-tarik/create')
                 ->waitFor('#nasabah_id', 10)
                 ->select('nasabah_id', (string) $nasabah->id)
-                ->type('jumlah', '20000')
-                ->press('Proses Penarikan')
-                ->waitFor('.alert', 10)
-                // Validation message from TransaksiTarikService
+                ->pause(500);
+
+            // Client-side JS disables submit button when jumlah > saldo.
+            // Set value + re-enable button + submit via JS to test server validation.
+            $browser->script([
+                "document.getElementById('jumlah').value = '20000';",
+                "document.getElementById('btn-submit').disabled = false;",
+                "document.getElementById('btn-submit').style.opacity = '1';",
+                "document.getElementById('form-tarik').submit();",
+            ]);
+
+            $browser->waitFor('.alert', 10)
                 ->assertSee('Saldo tidak mencukupi');
         });
 
@@ -107,10 +121,13 @@ class TransaksiTarikTest extends DuskTestCase
      * State tetap: Form Input
      * Penarikan dengan jumlah kosong ditolak sistem.
      * Custom message: "Jumlah penarikan wajib diisi."
+     *
+     * NOTE: HTML input punya required, jadi submit via JS.
      */
     public function test_tarik_saldo_ditolak_jika_jumlah_kosong()
     {
         $nasabah = Nasabah::factory()->create([
+            'no_hp' => '081234567892',
             'saldo' => 50000,
         ]);
 
@@ -119,9 +136,12 @@ class TransaksiTarikTest extends DuskTestCase
                 ->visit('/admin/transaksi-tarik/create')
                 ->waitFor('#nasabah_id', 10)
                 ->select('nasabah_id', (string) $nasabah->id)
-                ->press('Proses Penarikan')
-                ->waitFor('.alert', 10)
-                // Custom validation message from TransaksiTarikRequest
+                ->pause(500);
+
+            // Jumlah kosong, submit via JS (bypass HTML5 required validation)
+            $browser->script("document.getElementById('form-tarik').submit();");
+
+            $browser->waitFor('.alert', 10)
                 ->assertSee('Jumlah penarikan wajib diisi');
         });
 
@@ -136,6 +156,7 @@ class TransaksiTarikTest extends DuskTestCase
     {
         $nasabah = Nasabah::factory()->create([
             'nama' => 'Budi Pekerti',
+            'no_hp' => '081234567893',
             'saldo' => 15000,
         ]);
 
@@ -160,11 +181,11 @@ class TransaksiTarikTest extends DuskTestCase
     {
         $nasabah = Nasabah::factory()->create([
             'nama' => 'Citra Lestari',
+            'no_hp' => '081234567894',
             'saldo' => 100000,
         ]);
 
         $this->browse(function (Browser $browser) use ($nasabah) {
-            // Lakukan satu kali penarikan terlebih dahulu
             $browser->loginAs($this->petugas)
                 ->visit('/admin/transaksi-tarik/create')
                 ->waitFor('#nasabah_id', 10)
@@ -173,7 +194,6 @@ class TransaksiTarikTest extends DuskTestCase
                 ->press('Proses Penarikan')
                 ->waitForLocation('/admin/transaksi-tarik', 10);
 
-            // Cek riwayat transaksi muncul di halaman daftar
             $browser->visit('/admin/transaksi-tarik')
                 ->waitForText('Citra Lestari', 10)
                 ->assertSee('Citra Lestari')

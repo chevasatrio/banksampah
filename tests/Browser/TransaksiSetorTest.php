@@ -31,6 +31,7 @@ class TransaksiSetorTest extends DuskTestCase
 
         $this->nasabah = Nasabah::factory()->create([
             'nama'  => 'Dewi Sartika',
+            'no_hp' => '081234567890',
             'saldo' => 0,
         ]);
 
@@ -66,7 +67,7 @@ class TransaksiSetorTest extends DuskTestCase
      * State: Form Input -> Sukses (happy path satu item)
      * Petugas mencatat setor sampah dengan data valid, saldo nasabah bertambah.
      *
-     * Note: Controller redirect ke halaman show (detail transaksi), bukan index.
+     * Controller redirect ke halaman show (detail transaksi), bukan index.
      * Flash message: "Transaksi berhasil dicatat. Total: Rp X.XXX"
      */
     public function test_petugas_dapat_mencatat_transaksi_setor_dengan_data_valid()
@@ -78,12 +79,9 @@ class TransaksiSetorTest extends DuskTestCase
                     ->select('nasabah_id', (string) $this->nasabah->id)
                     ->select('items[0][jenis_sampah_id]', (string) $this->jenisSampah->id)
                     ->type('items[0][berat_kg]', '4')
-                    // Button text: "Simpan Transaksi"
                     ->press('Simpan Transaksi')
-                    // Controller redirects to show page: /admin/transaksi-setor/{id}
                     ->waitForText('Transaksi berhasil dicatat', 10)
                     ->assertSee('Transaksi berhasil dicatat')
-                    // 4 kg x Rp1.500 = Rp6.000
                     ->assertSee('Rp 6.000');
         });
 
@@ -94,6 +92,9 @@ class TransaksiSetorTest extends DuskTestCase
      * State tetap: Form Input
      * Berat sampah 0 kg ditolak oleh validasi min:0.01.
      * Custom message: "Berat sampah minimal 0.01 KG."
+     *
+     * NOTE: HTML input punya min="0.01", jadi harus submit via JS
+     * untuk bypass browser HTML5 validation.
      */
     public function test_setor_gagal_jika_berat_sampah_nol()
     {
@@ -102,11 +103,15 @@ class TransaksiSetorTest extends DuskTestCase
                     ->visit('/admin/transaksi-setor/create')
                     ->waitFor('#nasabah_id', 10)
                     ->select('nasabah_id', (string) $this->nasabah->id)
-                    ->select('items[0][jenis_sampah_id]', (string) $this->jenisSampah->id)
-                    ->type('items[0][berat_kg]', '0')
-                    ->press('Simpan Transaksi')
-                    ->waitFor('.alert', 10)
-                    // Custom validation message from TransaksiSetorRequest
+                    ->select('items[0][jenis_sampah_id]', (string) $this->jenisSampah->id);
+
+            // Set berat ke 0 via JS, lalu submit via JS (bypass HTML5 min validation)
+            $browser->script([
+                "document.querySelector('input[name=\"items[0][berat_kg]\"]').value = '0';",
+                "document.getElementById('form-setor').submit();",
+            ]);
+
+            $browser->waitFor('.alert', 10)
                     ->assertSee('Berat sampah minimal 0.01 KG');
         });
 
@@ -130,7 +135,6 @@ class TransaksiSetorTest extends DuskTestCase
                     ->assertSee('Transaksi berhasil dicatat');
         });
 
-        // 0.01 kg x Rp1.500 = Rp15
         $this->assertEquals(15.0, $this->nasabah->fresh()->saldo);
     }
 
@@ -151,7 +155,6 @@ class TransaksiSetorTest extends DuskTestCase
                     ->assertSee('Transaksi berhasil dicatat');
         });
 
-        // 100 kg x Rp1.500 = Rp150.000
         $this->assertEquals(150000.0, $this->nasabah->fresh()->saldo);
     }
 
@@ -159,6 +162,9 @@ class TransaksiSetorTest extends DuskTestCase
      * State tetap: Form Input
      * Setor tanpa memilih jenis sampah ditolak sistem.
      * Custom message: "Jenis sampah wajib dipilih."
+     *
+     * NOTE: HTML select punya required, jadi harus submit via JS
+     * untuk bypass browser HTML5 validation.
      */
     public function test_setor_gagal_jika_jenis_sampah_tidak_dipilih()
     {
@@ -166,11 +172,15 @@ class TransaksiSetorTest extends DuskTestCase
             $browser->loginAs($this->petugas)
                     ->visit('/admin/transaksi-setor/create')
                     ->waitFor('#nasabah_id', 10)
-                    ->select('nasabah_id', (string) $this->nasabah->id)
-                    ->type('items[0][berat_kg]', '5')
-                    ->press('Simpan Transaksi')
-                    ->waitFor('.alert', 10)
-                    // Custom validation message from TransaksiSetorRequest
+                    ->select('nasabah_id', (string) $this->nasabah->id);
+
+            // Set berat via JS, jenis_sampah tetap kosong, submit via JS (bypass HTML5 required)
+            $browser->script([
+                "document.querySelector('input[name=\"items[0][berat_kg]\"]').value = '5';",
+                "document.getElementById('form-setor').submit();",
+            ]);
+
+            $browser->waitFor('.alert', 10)
                     ->assertSee('Jenis sampah wajib dipilih');
         });
     }
@@ -195,7 +205,6 @@ class TransaksiSetorTest extends DuskTestCase
                     ->select('nasabah_id', (string) $this->nasabah->id)
                     ->select('items[0][jenis_sampah_id]', (string) $this->jenisSampah->id)
                     ->type('items[0][berat_kg]', '5')
-                    // Button text: "Tambah Jenis Sampah"
                     ->press('Tambah Jenis Sampah')
                     ->pause(500)
                     ->select('items[1][jenis_sampah_id]', (string) $jenisB->id)
